@@ -11,7 +11,7 @@
     "name": "rolldown-runtime"
   },
   "app/Game.tsx": {
-    "file": "assets/Game-Dt-Ic1v8.js",
+    "file": "assets/Game-C_4mwo_C.js",
     "name": "Game",
     "src": "app/Game.tsx",
     "isDynamicEntry": true,
@@ -21,7 +21,7 @@
     ]
   },
   "node_modules/.pnpm/vinext@0.0.50_@vitejs+plugi_6558342ba0b940cbd621b36b626ca262/node_modules/vinext/dist/shims/layout-segment-context.js": {
-    "file": "assets/layout-segment-context-BUZfOkdV.js",
+    "file": "assets/layout-segment-context-Do9bcqb8.js",
     "name": "layout-segment-context",
     "src": "node_modules/.pnpm/vinext@0.0.50_@vitejs+plugi_6558342ba0b940cbd621b36b626ca262/node_modules/vinext/dist/shims/layout-segment-context.js",
     "isDynamicEntry": true,
@@ -32,7 +32,7 @@
     ]
   },
   "virtual:vinext-app-browser-entry": {
-    "file": "assets/index-CeINW5RZ.js",
+    "file": "assets/index-DxtIGZvJ.js",
     "name": "index",
     "src": "virtual:vinext-app-browser-entry",
     "isEntry": true,
