@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./tata-motion.css";
+import "./level-system.css";
 
 export const metadata: Metadata = {
   title: "TATTU黄狼极速无限消",

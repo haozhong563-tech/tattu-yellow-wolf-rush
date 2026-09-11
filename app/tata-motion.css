@@ -1,0 +1,28 @@
+.tile i{inset:2px 2px 4px;background-image:url('../tata-wolf-costumes-v2.png');animation:portraitBreath 2.8s ease-in-out infinite;will-change:transform,filter}
+.tile.runner i{background-position:0 0}.tile.pilot i{background-position:50% 0}.tile.battery i{background-position:100% 0}.tile.racer i{background-position:0 100%}.tile.crystal i{background-position:50% 100%}.tile.overdrive i{background-position:100% 100%}
+.tile:before{content:"";position:absolute;inset:0;z-index:2;background:linear-gradient(105deg,transparent 34%,#ffffff55 48%,transparent 62%);transform:translateX(-140%);animation:shine 4.5s ease-in-out infinite;pointer-events:none}
+.tile:after{content:"";position:absolute;left:23%;right:23%;top:36%;height:2px;z-index:3;border-radius:50%;background:#111;box-shadow:0 0 4px #ffd400;opacity:0;animation:blink 6.2s infinite;pointer-events:none}
+.tile:nth-child(3n):after{animation-delay:1.35s}.tile:nth-child(5n):after{animation-delay:2.8s}.tile:nth-child(7n):after{animation-delay:4.1s}
+.tile:nth-child(2n) i{animation-delay:-1.15s}.tile:nth-child(3n) i{animation-duration:3.25s}.tile:nth-child(5n):before{animation-delay:-2.2s}
+.tile.pilot:before{background:linear-gradient(180deg,transparent 20%,#35dcff99 49%,transparent 54%);animation:scan 2.7s linear infinite}.tile.battery{animation:powerPulse 2.1s ease-in-out infinite}.tile.racer i{animation-name:portraitBreath,boostNudge;animation-duration:2.8s,1.8s}.tile.crystal{animation:crystalPulse 1.8s ease-in-out infinite}.tile.overdrive{animation:overdrivePulse 1.35s ease-in-out infinite}
+.tile.row i,.tile.column i,.tile.nova i{background-image:url('../tata-wolf-specials-v2.png');background-size:200% 200%;inset:1px;animation:specialIcon .85s ease-in-out infinite}.tile.row i{background-position:0 0}.tile.column i{background-position:100% 0}.tile.nova i{background-position:100% 100%}.tile.row:after,.tile.column:after,.tile.nova:after{display:none}
+.tile.row:before{background:linear-gradient(90deg,transparent,#fff,#ffd400,transparent);animation:specialSweep .78s linear infinite}.tile.column:before{background:linear-gradient(180deg,transparent,#fff,#35dcff,transparent);animation:specialSweepY .78s linear infinite}.tile.nova:before{inset:-45%;background:conic-gradient(transparent,#fff,transparent 18%,#ffd400,transparent 42%,#35dcff,transparent 70%);animation:spin 1.1s linear infinite}
+.energy button{position:relative;overflow:hidden}.energy button:after{content:"";position:absolute;inset:-55%;background:conic-gradient(transparent,#fff9,transparent 25%);animation:spin 2.2s linear infinite;mix-blend-mode:overlay}
+.arena-bolts,.ambient-sparks{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden}.arena-bolts i{position:absolute;width:2px;height:42vh;left:18%;top:-10%;background:linear-gradient(transparent,#ffd400,#fff,transparent);filter:drop-shadow(0 0 8px #ffd400);transform:rotate(52deg) scaleY(.15);opacity:0;animation:ambientBolt 7s infinite}.arena-bolts i:nth-child(2){left:76%;top:12%;animation-delay:-2.4s;transform:rotate(-48deg) scaleY(.15)}.arena-bolts i:nth-child(3){left:48%;top:68%;animation-delay:-4.8s}
+.ambient-sparks i{--angle:calc(var(--n)*25.714deg);position:absolute;left:50%;top:52%;width:3px;height:14px;background:linear-gradient(#fff,#ffd400,transparent);box-shadow:0 0 7px #ffd400;opacity:0;transform:rotate(var(--angle)) translateY(20vh);animation:ambientSpark 5.5s calc(var(--n)*-.37s) linear infinite}
+.is-rush .arena-bolts i{animation-duration:.72s}.is-rush .ambient-sparks i{animation-duration:1.35s}.is-rush .arena{filter:saturate(1.6) brightness(.82)}.is-rush .vignette{animation:rushVignette .24s alternate infinite}
+@keyframes portraitBreath{50%{transform:scale(1.038) translateY(-1px);filter:brightness(1.08) drop-shadow(0 4px 3px #000)}}
+@keyframes shine{0%,72%{transform:translateX(-140%)}88%,100%{transform:translateX(140%)}}
+@keyframes blink{0%,93%,96%,100%{opacity:0;transform:scaleY(1)}94%,95%{opacity:.92;transform:scaleY(.5)}}
+@keyframes scan{from{transform:translateY(-95%)}to{transform:translateY(95%)}}
+@keyframes powerPulse{50%{box-shadow:inset 0 0 19px #ffd40066,0 0 12px #ffd40077}}
+@keyframes boostNudge{50%{translate:1px -1px}}
+@keyframes crystalPulse{50%{filter:brightness(1.4) saturate(1.55);box-shadow:inset 0 0 19px #35dcff77,0 0 13px #35dcff88}}
+@keyframes overdrivePulse{50%{filter:brightness(1.28) saturate(1.38);box-shadow:inset 0 0 22px #fff37a77,0 0 16px #ffd400aa}}
+@keyframes specialIcon{50%{transform:scale(1.08);filter:brightness(1.35) drop-shadow(0 0 8px #ffd400)}}
+@keyframes specialSweep{from{transform:translateX(-120%)}to{transform:translateX(120%)}}
+@keyframes specialSweepY{from{transform:translateY(-120%)}to{transform:translateY(120%)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes ambientBolt{0%,89%,100%{opacity:0;scale:.8 1}91%{opacity:.9;scale:1.8 1}94%{opacity:.12}96%{opacity:.72}}
+@keyframes ambientSpark{0%{opacity:0;transform:rotate(var(--angle)) translateY(12vh) scale(.3)}12%{opacity:.7}70%,100%{opacity:0;transform:rotate(var(--angle)) translateY(62vh) scale(1)}}
+@keyframes rushVignette{to{filter:hue-rotate(-10deg) brightness(1.35)}}
