@@ -15,8 +15,8 @@ test("server renders the TATTU game shell", async () => {
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /<title>TATTU黄狼极速无限消<\/title>/);
-  assert.match(html, /8列9行消除棋盘/);
-  assert.match(html, /过载暴击/);
-  assert.match(html, /连续消除积满能量/);
+  assert.match(html, /能量阵列启动中/);
+  assert.match(html, /tattu-logo\.png/);
+  assert.match(html, /assets\/Game-[^"']+\.js/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
 });
