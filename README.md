@@ -1,4 +1,12 @@
-# vinext-starter
+# TATTU 塔塔能源森林
+
+当前游戏为 Phaser 3.90 单关三消版本，入口 `play.html` 与 `game/main.mjs`。
+运行 `npm run dev`、`npm test`、`npm run build`；构建输出位于 `dist-game/`。
+玩法、美术、音乐与验收说明见 [FOREST_RELEASE.md](docs/FOREST_RELEASE.md)。
+
+下面为保留的旧 vinext 工程说明；旧应用可通过 `npm run build:legacy` 构建。
+
+## 原工程说明
 
 A clean full-stack starter running on
 [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and

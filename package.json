@@ -6,16 +6,18 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "vinext dev",
-    "build": "vinext build",
-    "start": "vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs",
+    "dev": "vite --config vite.game.config.mjs --open /play.html",
+    "build": "node scripts/build-game.mjs",
+    "start": "vite preview --config vite.game.config.mjs",
+    "test": "node --test tests/model.test.mjs",
+    "build:legacy": "vinext build",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
     "next": "16.2.6",
+    "phaser": "3.90.0",
     "react": "19.2.6",
     "react-dom": "19.2.6"
   },
