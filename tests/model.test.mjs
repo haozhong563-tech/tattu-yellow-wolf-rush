@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { ROWS, COLS, createBoard, matches, legalMoves, buildTurn, buildToolTurn, buildRushTurn } from '../game/model.mjs';
+import { planRewards, buildRewardTurn } from '../game/rewards.mjs';
 
 function random(seed) {
   let state = seed >>> 0;
@@ -275,28 +276,33 @@ function sceneHarness(seed = 516) {
     .replace('export class ForestScene', 'class ForestScene');
   const ForestScene = vm.runInNewContext(`${source}\nForestScene;`, {
     Phaser: { Scene: class {}, Math: { Between: (a) => a } },
-    createBoard, buildTurn, buildToolTurn, buildRushTurn, legalMoves, COLS,
+    createBoard, buildTurn, buildToolTurn, buildRushTurn, legalMoves, COLS, planRewards, buildRewardTurn,
+    REWARD_NAMES: { hammer: '塔塔重锤', drone: '无人机蜂群', rift: '时空裂隙', overdrive: '觉醒' },
+    TRACKS: Array.from({ length: 10 }, (_, index) => ({ name: `Track ${index}` })),
     document: { getElementById: id => id === 'app' ? app : { textContent: '' } },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
   });
   const scene = new ForestScene();
-  const visual = () => ({ setText() { return this; }, setColor() { return this; }, setVisible() { return this; } });
+  const visual = () => ({ setText() { return this; }, setColor() { return this; }, setVisible() { return this; }, setTexture() { return this; }, setDepth() { return this; }, setDisplaySize() { return this; } });
   Object.assign(scene, {
     alive: true, state: 'idle', board: createBoard(random(seed)), nodes: new Map(), ice: new Set(), iceNodes: new Map(), progress: [0, 0],
-    moves: 30, score: 0, best: 0, energy: 0, rushRemaining: 0, rushQueue: [], selected: null, activeTool: null,
-    tools: { hammer: 3, bomb: 2, shuffle: 2 }, reduced: true, lastAction: 0, lastBlink: 0, hintNodes: [],
+    moves: 30, score: 0, best: 0, energy: 0, rushRemaining: 0, rushQueue: [], selected: null,
+    runId: 1, pendingRewards: [], rewardStats: { hammer: 0, drone: 0, rift: 0 }, turnSource: 'player', turnCinematicShown: false, completing: false,
+    reduced: true, lastAction: 0, lastBlink: 0, hintNodes: [], track: -1, rewardAttacks: [], cinematicCalls: [],
     cellButtons: Array.from({ length: 72 }, () => ({ dataset: {} })),
     selection: visual(), movesText: visual(), scoreText: visual(), goalTexts: [visual(), visual(), visual()],
-    fx: { burst() {}, floatText() {}, collect() {}, beam() {}, bomb() {}, nova() {}, celebrate() {} },
-    audio: { swap() {}, clear() {}, collect() {}, stopRush() {}, suspend() {}, resume() {}, win() {}, lose() {} },
+    fx: { burst() {}, floatText() {}, collect() {}, beam() {}, bomb() {}, nova() {}, celebrate() {}, rushBeat() {}, async windup() {}, async rewardAttack(type, targets, impact) { scene.rewardAttacks.push({ type, targets }); impact?.(); } },
+    cinematic: { async play(type, count) { scene.cinematicCalls.push({ type, count }); }, destroy() {} },
+    audio: { swap() {}, clear() {}, collect() {}, stopRush() {}, startRush() {}, suspend() {}, resume() {}, win() {}, lose() {}, cinematic() {}, rewardCharge() {}, rewardImpact() {}, destroy() {} },
+    stageHero: visual(), rewardTitle: visual(), rewardDetail: visual(),
     cameras: { main: { shake() {} } }, tweens: { add() {}, killTweensOf() {} },
     time: { now: 200, delayedCall(_ms, callback) { callback(); } },
     root: { replaceChildren() {}, querySelector() { return {}; } }, a11y: { inert: false },
-    scene: { pause() {}, resume() {} }, resultCalls: [],
+    scene: { pause() {}, resume() {}, restart() {} }, resultCalls: [],
     async delay() {}, async tween() {}, clearHint() {}, say(message) { this.message = message; }, showPause() {},
     updateHUD() { this.syncAccessibility(); },
     async moveFrame(board) { this.board = board; },
-    async showResult(win) { this.resultCalls.push({ win, moves: this.moves, score: this.score, boardFull: this.board.every(Boolean) }); },
+    async showResult(win) { this.resultCalls.push({ win, moves: this.moves, score: this.score, boardFull: this.board.every(Boolean), pendingRewards: this.pendingRewards.length, rewardStats: { ...this.rewardStats } }); },
     showDialog(html) { this.dialog = html; },
   });
   return { scene, app };
@@ -416,4 +422,205 @@ test('victory step bonus is reflected in accessible score as well as the result 
   assert.equal(scene.score, 1240);
   assert.equal(app.dataset.score, '1240');
   assert.ok(scene.dialog.includes('1,240'));
+});
+
+test('completeTurn drains every earned reward before declaring victory, without consuming moves or charging energy', async () => {
+  const { scene } = sceneHarness(423);
+  scene.progress = [18, 18];
+  scene.ice = new Set([27]);
+  scene.moves = 12;
+  scene.energy = 35;
+  scene.pendingRewards = [{ type: 'hammer', count: 1, origin: 27 }, { type: 'drone', count: 1, origin: 43 }];
+  await scene.completeTurn();
+  assert.equal(scene.state, 'won');
+  assert.equal(scene.pendingRewards.length, 0);
+  assert.deepEqual(scene.rewardStats, { hammer: 1, drone: 1, rift: 0 });
+  assert.equal(scene.rewardAttacks.length, 2);
+  assert.equal(scene.cinematicCalls.length, 1, 'A grouped turn should not repeat its character entrance');
+  assert.equal(scene.moves, 12);
+  assert.equal(scene.energy, 35);
+  assert.equal(scene.resultCalls.length, 1);
+  assert.equal(scene.resultCalls[0].pendingRewards, 0);
+  assert.deepEqual(scene.resultCalls[0].rewardStats, { hammer: 1, drone: 1, rift: 0 });
+  assert.ok(scene.score > 0);
+  assert.equal(scene.completing, false);
+  stable(scene.board);
+});
+
+test('an earned attack can trigger a nova without recursively earning another reward', async () => {
+  const { scene } = sceneHarness(443);
+  scene.board[27].special = 'nova';
+  scene.ice = new Set([27, 35]);
+  scene.progress = [18, 18];
+  scene.moves = 11;
+  scene.energy = 21;
+  scene.pendingRewards = [{ type: 'hammer', count: 1, origin: 27 }];
+  const executed = [];
+  const realPlayTurn = scene.playTurn.bind(scene);
+  scene.playTurn = async (turn, consume, fast, source) => { executed.push({ turn, source }); return realPlayTurn(turn, consume, fast, source); };
+  await scene.completeTurn();
+  assert.equal(executed.length, 1);
+  assert.equal(executed[0].source, 'reward');
+  assert.ok(executed[0].turn.frames.some(frame => frame.activated?.some(item => item.special === 'nova')));
+  assert.equal(scene.pendingRewards.length, 0);
+  assert.deepEqual(scene.rewardStats, { hammer: 1, drone: 0, rift: 0 });
+  assert.equal(scene.energy, 21);
+  assert.equal(scene.moves, 11);
+  assert.equal(scene.state, 'won');
+  stable(scene.board);
+});
+
+test('rush earns support during taps but queues it until the timer expires', async () => {
+  const { scene } = sceneHarness(302);
+  scene.board[27].special = 'row';
+  scene.state = 'rush';
+  scene.rushRemaining = 5000;
+  scene.ice = new Set(Array.from({ length: 72 }, (_, index) => index));
+  scene.moves = 9;
+  const turn = buildRushTurn(scene.board, 27, random(551));
+  const earned = planRewards(turn, { source: 'rush' });
+  assert.ok(earned.length > 0);
+  await scene.playTurn(turn, false, true, 'rush');
+  assert.equal(scene.state, 'rush');
+  assert.deepEqual(JSON.parse(JSON.stringify(scene.pendingRewards)), earned);
+  assert.equal(scene.rewardAttacks.length, 0);
+  assert.equal(scene.cinematicCalls.length, 0);
+  assert.equal(scene.energy, 0, 'Rush clears must not refill their own energy meter');
+  assert.equal(scene.moves, 9);
+  const realCompleteTurn = scene.completeTurn.bind(scene);
+  let completion;
+  scene.completeTurn = (...args) => (completion = realCompleteTurn(...args));
+  scene.rushRemaining = 1;
+  scene.update(5010, 2);
+  assert.ok(completion);
+  await completion;
+  assert.equal(scene.pendingRewards.length, 0);
+  for (const reward of earned) assert.equal(scene.rewardStats[reward.type], reward.count);
+  assert.equal(scene.rewardAttacks.length, earned.length);
+  assert.equal(scene.rushRemaining, 0);
+  assert.equal(scene.energy, 0);
+  assert.equal(scene.moves, 9);
+  assert.ok(['idle', 'won'].includes(scene.state));
+  stable(scene.board);
+});
+
+test('a final move that fills energy gets automatic overdrive before defeat is checked', async () => {
+  const { scene } = sceneHarness(929);
+  scene.moves = 1;
+  scene.energy = 99;
+  scene.ice = new Set(Array.from({ length: 72 }, (_, index) => index));
+  const move = legalMoves(scene.board)[0];
+  await scene.playTurn(buildTurn(scene.board, move.a, move.b, random(762)), true);
+  assert.equal(scene.moves, 0);
+  assert.ok(scene.ice.size > 0);
+  assert.equal(scene.state, 'rush');
+  assert.equal(scene.rushRemaining, 15000);
+  assert.equal(scene.energy, 0);
+  assert.equal(scene.resultCalls.length, 0);
+  assert.ok(scene.cinematicCalls.some(call => call.type === 'overdrive'));
+  const realCompleteTurn = scene.completeTurn.bind(scene);
+  let completion;
+  scene.completeTurn = (...args) => (completion = realCompleteTurn(...args));
+  scene.rushRemaining = 1;
+  scene.update(200, 2);
+  await completion;
+  assert.equal(scene.state, 'lost');
+  assert.equal(scene.resultCalls.length, 1);
+  assert.equal(scene.resultCalls[0].win, false);
+});
+
+test('the hero stage has only top pause/help hits and no free bottom inventory buttons', () => {
+  const { scene } = sceneHarness();
+  const visual = () => ({ setDepth() { return this; }, setDisplaySize() { return this; } });
+  scene.add = { ellipse: visual, image: visual };
+  scene.text = visual;
+  scene.drawGlyph = () => {};
+  const hits = [];
+  scene.addHit = (label, x, y, width, height) => hits.push({ label, x, y, width, height });
+  scene.drawControls();
+  assert.deepEqual(hits.map(hit => hit.label), ['暂停与设置', '玩法说明']);
+  assert.ok(hits.every(hit => hit.y < 100));
+  assert.equal('tools' in scene, false);
+  assert.equal(typeof scene.chooseTool, 'undefined');
+});
+
+function deferred() {
+  let resolve;
+  const promise = new Promise(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+test('clearFrame cannot write an old null snapshot after a new run starts', async () => {
+  const { scene } = sceneHarness(732);
+  const move = legalMoves(scene.board)[0];
+  const frame = buildTurn(scene.board, move.a, move.b, random(727)).frames.find(frame => frame.type === 'clear');
+  const gate = deferred();
+  scene.delay = () => gate.promise;
+  const clearing = scene.clearFrame(frame, true);
+  const newBoard = createBoard(random(384));
+  scene.runId++;
+  scene.board = newBoard;
+  scene.score = 0;
+  scene.progress = [0, 0];
+  scene.state = 'intro';
+  gate.resolve();
+  await clearing;
+  assert.equal(scene.board, newBoard);
+  assert.equal(scene.score, 0);
+  assert.deepEqual(scene.progress, [0, 0]);
+  assert.equal(scene.state, 'intro');
+});
+
+test('moveFrame cannot replace a new board when an old fall finishes', async () => {
+  const { scene } = sceneHarness(642);
+  delete scene.moveFrame;
+  scene.decorate = () => {};
+  scene.nodes = new Map(scene.board.map((cell, index) => [cell.id, { cell: { ...cell }, index, x: 0, y: 0, active: true, icon: {}, destroy() {} }]));
+  const gate = deferred();
+  scene.tween = () => gate.promise;
+  const oldBoard = scene.board.map(cell => ({ ...cell }));
+  const falling = scene.moveFrame(oldBoard, 200, true);
+  const newBoard = createBoard(random(934));
+  scene.runId++;
+  scene.board = newBoard;
+  scene.state = 'intro';
+  gate.resolve();
+  await falling;
+  assert.equal(scene.board, newBoard);
+  assert.equal(scene.state, 'intro');
+});
+
+test('completeTurn cinematic cancellation cannot set flags or rewards in a new run', async () => {
+  const { scene } = sceneHarness(998);
+  scene.pendingRewards = [{ type: 'hammer', count: 1, origin: 27 }];
+  const gate = deferred();
+  scene.cinematic.play = () => gate.promise;
+  const completing = scene.completeTurn();
+  assert.equal(scene.state, 'cinematic');
+  const newBoard = createBoard(random(734));
+  scene.runId++;
+  scene.board = newBoard;
+  scene.state = 'intro';
+  scene.turnCinematicShown = false;
+  scene.completing = false;
+  scene.pendingRewards = [];
+  scene.rewardStats = { hammer: 0, drone: 0, rift: 0 };
+  gate.resolve();
+  await completing;
+  assert.equal(scene.board, newBoard);
+  assert.equal(scene.state, 'intro');
+  assert.equal(scene.turnCinematicShown, false);
+  assert.equal(scene.completing, false);
+  assert.deepEqual(scene.rewardStats, { hammer: 0, drone: 0, rift: 0 });
+  assert.equal(scene.rewardAttacks.length, 0);
+});
+
+test('restart immediately invalidates callbacks before Phaser queues scene creation', () => {
+  const { scene } = sceneHarness();
+  const run = scene.runId;
+  let queued = false;
+  scene.scene.restart = () => { queued = true; };
+  scene.restart();
+  assert.ok(queued);
+  assert.ok(!scene.alive || scene.runId !== run, 'Old promises must become invalid before the queued restart executes');
 });

@@ -3,8 +3,11 @@
  * onBeat({ beat, bar, strength, track, time }) uses the AudioContext clock.
  */
 const MUSIC_SECONDS = 15;
+const MAX_VOICES = 128;
 const midi = note => 440 * 2 ** ((note - 69) / 12);
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
+const rewardType = value => ({ bomb: 'drone', shuffle: 'rift', rush: 'overdrive', nova: 'rift' })[value] || (['hammer', 'drone', 'rift', 'overdrive'].includes(value) ? value : 'rift');
+const CHARGE_SECONDS = { hammer: .46, drone: .68, rift: .58, overdrive: .72 };
 
 const COMPOSITIONS = [
   { name: '雷霆起跑', bpm: 132, root: 42, wave: 'sawtooth', kick: [0,4,8,12], snare: [4,12], hat: 2, swing: 0, progression: [0,7,3,5], bass: [0,-1,0,7,0,-1,12,-1,0,0,-1,7,0,-1,10,7], motif: [12,-1,19,15,-1,19,22,-1,19,15,12,-1,10,12,15,19], chord: [0,3,7], gate: .68 },
@@ -29,6 +32,7 @@ export class GameAudio {
     this._voices = new Set();
     this._beatTimers = new Set();
     this._lastFX = new Map();
+    this._lastHaptic = -100;
     this._scheduler = null;
     this._music = null;
     this._paused = false;
@@ -71,6 +75,8 @@ export class GameAudio {
     this._fxBus.gain.value = .58;
     this._musicBus = ctx.createGain();
     this._musicBus.gain.value = .62;
+    this._musicDuck = ctx.createGain();
+    this._musicDuck.gain.value = 1;
     this._leadBus = ctx.createGain();
     this._leadBus.gain.value = .8;
     this._delay = ctx.createDelay(1);
@@ -83,7 +89,8 @@ export class GameAudio {
     this._echoFilter.type = 'lowpass';
     this._echoFilter.frequency.value = 2500;
     this._fxBus.connect(this._master);
-    this._musicBus.connect(this._master);
+    this._musicBus.connect(this._musicDuck);
+    this._musicDuck.connect(this._master);
     this._leadBus.connect(this._musicBus);
     this._leadBus.connect(this._delay);
     this._delay.connect(this._echoFilter);
@@ -92,8 +99,15 @@ export class GameAudio {
     this._echoFilter.connect(this._wet);
     this._wet.connect(this._musicBus);
     this._master.connect(this._compressor);
-    this._compressor.connect(ctx.destination);
-    this._graphNodes = [this._fxBus, this._musicBus, this._leadBus, this._delay, this._feedback, this._wet, this._echoFilter, this._master, this._compressor];
+    this._graphNodes = [this._fxBus, this._musicBus, this._musicDuck, this._leadBus, this._delay, this._feedback, this._wet, this._echoFilter, this._master, this._compressor];
+    if (ctx.createWaveShaper) {
+      // Final soft ceiling also catches the compressor's attack transient.
+      const safety = ctx.createWaveShaper(), curve = new Float32Array(2049);
+      for (let i = 0; i < curve.length; i++) curve[i] = .95 * Math.tanh(i / 1024 - 1);
+      safety.curve = curve;
+      this._compressor.connect(safety); safety.connect(ctx.destination);
+      this._graphNodes.push(safety);
+    } else this._compressor.connect(ctx.destination);
     this._noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
     const data = this._noiseBuffer.getChannelData(0);
     let seed = 0x74617461;
@@ -115,7 +129,10 @@ export class GameAudio {
   setHaptics(value) { this.haptics = Boolean(value); }
 
   _vibrate(pattern) {
-    if (!this.haptics || this._paused || this._destroyed) return;
+    if (!this.haptics || this._paused || this._destroyed || this.context?.state !== 'running') return;
+    const now = this.context.currentTime;
+    if (now - this._lastHaptic < .065) return;
+    this._lastHaptic = now;
     try { globalThis.navigator?.vibrate?.(pattern); } catch { /* Optional hardware. */ }
   }
 
@@ -138,6 +155,26 @@ export class GameAudio {
     return voice;
   }
 
+  _voiceBudget() {
+    if (this._voices.size < MAX_VOICES) return true;
+    // Retire an old transient before adding another; preserve the music groove.
+    for (const voice of this._voices) if (voice.group !== 'music') {
+      this._dispose(voice);
+      return true;
+    }
+    return false;
+  }
+
+  _route(gain, bus, options, time, duration, nodes) {
+    const ctx = this.context;
+    if (ctx.createStereoPanner && (options.pan !== undefined || options.panTo !== undefined)) {
+      const pan = ctx.createStereoPanner();
+      pan.pan.setValueAtTime(clamp(options.pan || 0, -.8, .8), time);
+      if (options.panTo !== undefined) pan.pan.linearRampToValueAtTime(clamp(options.panTo, -.8, .8), time + duration);
+      gain.connect(pan); pan.connect(bus); nodes.push(pan);
+    } else gain.connect(bus);
+  }
+
   _dispose(voice, stop = true) {
     if (voice.disposed) return;
     voice.disposed = true;
@@ -150,40 +187,37 @@ export class GameAudio {
   }
 
   _tone(frequency, time, duration, volume, options = {}) {
-    if (!this.enabled || this._destroyed || !this.context) return;
+    if (!this.enabled || this._destroyed || !this.context || !this._voiceBudget()) return;
     const ctx = this.context, gain = ctx.createGain(), filter = ctx.createBiquadFilter();
     const end = time + duration;
     filter.type = options.filterType || 'lowpass';
     filter.Q.value = options.resonance || .65;
     filter.frequency.setValueAtTime(options.cutoff || 6500, time);
     if (options.cutoffEnd) filter.frequency.exponentialRampToValueAtTime(Math.max(30, options.cutoffEnd), end);
-    const attack = Math.min(options.attack || .004, duration * .25);
+    const attack = Math.min(options.attack || .004, duration * (options.rise ? .88 : .25));
     gain.gain.setValueAtTime(.0001, time);
-    gain.gain.exponentialRampToValueAtTime(Math.max(.0002, volume), time + attack);
+    gain.gain.exponentialRampToValueAtTime(clamp(volume, .0002, .8), time + attack);
     gain.gain.exponentialRampToValueAtTime(.0001, end);
     filter.connect(gain);
     const bus = options.lead ? this._leadBus : options.music ? this._musicBus : this._fxBus;
     const nodes = [filter, gain], sources = [];
-    if (ctx.createStereoPanner && options.pan) {
-      const pan = ctx.createStereoPanner();
-      pan.pan.value = clamp(options.pan, -.8, .8);
-      gain.connect(pan); pan.connect(bus); nodes.push(pan);
-    } else gain.connect(bus);
+    this._route(gain, bus, options, time, duration, nodes);
     const detunes = options.unison ? [-7, 7] : [0];
     for (const detune of detunes) {
       const osc = ctx.createOscillator();
       osc.type = options.wave || 'sine';
       osc.frequency.setValueAtTime(Math.max(20, frequency), time);
+      if (options.peak) osc.frequency.exponentialRampToValueAtTime(Math.max(20, options.peak), time + duration * .46);
       if (options.to) osc.frequency.exponentialRampToValueAtTime(Math.max(20, options.to), time + duration * .8);
       osc.detune.value = detune;
       osc.connect(filter); sources.push(osc); nodes.push(osc);
     }
-    this._register(sources, nodes, options.music || options.lead ? 'music' : 'fx');
+    this._register(sources, nodes, options.group || (options.music || options.lead ? 'music' : 'fx'));
     for (const source of sources) { source.start(time); source.stop(end + .02); }
   }
 
   _noise(time, duration, volume, frequency = 6000, options = {}) {
-    if (!this.enabled || this._destroyed || !this.context) return;
+    if (!this.enabled || this._destroyed || !this.context || !this._voiceBudget()) return;
     const ctx = this.context, source = ctx.createBufferSource(), gain = ctx.createGain(), filter = ctx.createBiquadFilter();
     source.buffer = this._noiseBuffer;
     filter.type = options.type || 'highpass';
@@ -191,11 +225,12 @@ export class GameAudio {
     filter.Q.value = .8;
     if (options.to) filter.frequency.exponentialRampToValueAtTime(options.to, time + duration);
     gain.gain.setValueAtTime(.0001, time);
-    gain.gain.exponentialRampToValueAtTime(Math.max(.0002, volume), time + Math.min(options.attack || .003, duration * .3));
+    gain.gain.exponentialRampToValueAtTime(clamp(volume, .0002, .45), time + Math.min(options.attack || .003, duration * (options.rise ? .88 : .3)));
     gain.gain.exponentialRampToValueAtTime(.0001, time + duration);
     source.connect(filter); filter.connect(gain);
-    gain.connect(options.music ? this._musicBus : this._fxBus);
-    this._register([source], [source, filter, gain], options.music ? 'music' : 'fx');
+    const nodes = [source, filter, gain];
+    this._route(gain, options.music ? this._musicBus : this._fxBus, options, time, duration, nodes);
+    this._register([source], nodes, options.group || (options.music ? 'music' : 'fx'));
     this._noiseCursor = (this._noiseCursor + .173) % .8;
     source.start(time, this._noiseCursor); source.stop(time + duration + .015);
   }
@@ -247,6 +282,90 @@ export class GameAudio {
     this._tone(midi(95), now + .055, .22, .065);
   }
 
+  /** Anticipation only: no hit and no haptic. Returns its suggested length in seconds. */
+  rewardCharge(type = 'hammer') {
+    type = rewardType(type);
+    const duration = CHARGE_SECONDS[type];
+    if (!this._available('reward-charge', .16)) return duration;
+    for (const voice of [...this._voices]) if (voice.group === 'charge') this._dispose(voice);
+    const now = this.context.currentTime, group = 'charge';
+    this._tone(type === 'rift' ? 34 : 48, now, duration, .16, { to: type === 'overdrive' ? 145 : 108, rise: true, attack: duration * .78, group });
+    this._noise(now, duration, .19, 380, { type: 'bandpass', to: 7200, rise: true, attack: duration * .8, group, pan: -.24, panTo: .2 });
+    if (type === 'drone') {
+      // A pair of propeller harmonics travels across the stereo field and bends down on approach.
+      this._tone(185, now, duration, .08, { wave: 'sawtooth', peak: 590, to: 225, cutoff: 1600, cutoffEnd: 3200, rise: true, attack: duration * .55, pan: -.7, panTo: .6, group });
+      this._tone(371, now + .025, duration - .025, .055, { wave: 'triangle', peak: 1160, to: 430, rise: true, attack: duration * .52, pan: -.6, panTo: .65, group });
+    } else if (type === 'hammer') {
+      this._noise(now + duration * .35, duration * .62, .12, 1700, { type: 'bandpass', to: 6400, rise: true, attack: duration * .48, pan: -.35, panTo: .05, group });
+    } else {
+      [0, 7, 12].forEach((note, i) => this._tone(midi(48 + note), now + i * .055, duration - i * .055, .046, { wave: 'sawtooth', to: midi(67 + note), rise: true, attack: duration * .63, cutoff: 850, cutoffEnd: 4700, pan: (i - 1) * .33, group }));
+    }
+    return duration;
+  }
+
+  /** Call exactly when a real reward strikes; power is clamped to 0.5–1.6. */
+  rewardImpact(type = 'hammer', power = 1) {
+    type = rewardType(type);
+    const ctx = this.context;
+    if (!ctx || ctx.state !== 'running' || this._paused || this._destroyed) return;
+    const now = ctx.currentTime;
+    if (now - (this._lastFX.get('reward-impact') ?? -100) < .11) return;
+    this._lastFX.set('reward-impact', now);
+    this._vibrate(type === 'hammer' ? [28, 24, 42] : type === 'drone' ? [16, 35, 22, 35, 28] : type === 'rift' ? [18, 28, 55] : [34, 30, 55]);
+    for (const voice of [...this._voices]) if (voice.group === 'charge') this._dispose(voice);
+    if (!this.enabled) return;
+    const gain = Math.sqrt(clamp(Number(power) || 1, .5, 1.6));
+    this._musicDuck.gain.cancelScheduledValues(now);
+    this._musicDuck.gain.setValueAtTime(.55, now);
+    this._musicDuck.gain.linearRampToValueAtTime(1, now + .46);
+    if (type === 'hammer') {
+      this._tone(175, now, .68, .58 * gain, { to: 35 });
+      this._tone(310, now, .19, .14 * gain, { wave: 'triangle', to: 78 });
+      this._noise(now, .055, .31 * gain, 3100, { type: 'highpass' });
+      this._noise(now + .018, .32, .23 * gain, 1800, { type: 'bandpass', to: 260 });
+      [621, 997, 1627, 2381].forEach((frequency, i) => this._tone(frequency, now + i * .003, .31 - i * .045, .055 * gain, { wave: 'triangle', cutoff: 5500, pan: (i - 1.5) * .16 }));
+    } else if (type === 'drone') {
+      [-.58, .5, .04].forEach((pan, i) => {
+        const at = now + i * .085;
+        this._tone(155 - i * 14, at, .47, .29 * gain, { to: 39, pan });
+        this._noise(at, .19, .18 * gain, 2400, { type: 'bandpass', to: 330, pan });
+        this._noise(at, .033, .13 * gain, 6200, { pan });
+      });
+      this._tone(82, now + .16, .62, .23 * gain, { to: 30 });
+    } else if (type === 'rift') {
+      this._tone(104, now, .95, .53 * gain, { to: 25 });
+      this._tone(1390, now, .12, .095 * gain, { wave: 'sawtooth', to: 180, cutoff: 5400 });
+      this._noise(now, .39, .25 * gain, 8100, { type: 'bandpass', to: 370 });
+      for (let i = 0; i < 5; i++) {
+        this._noise(now + .022 + i * .034, .032, .08 * gain, 4900 + i * 500, { pan: i % 2 ? .58 : -.58 });
+        this._tone(2100 - i * 275, now + .022 + i * .034, .055, .033 * gain, { wave: 'square', to: 330, cutoff: 3900, pan: i % 2 ? .58 : -.58 });
+      }
+    } else {
+      this._tone(196, now, 1.05, .61 * gain, { to: 31 });
+      this._tone(385, now, .38, .14 * gain, { wave: 'triangle', to: 66 });
+      this._noise(now, .065, .29 * gain, 6200);
+      this._noise(now + .014, .66, .25 * gain, 2600, { type: 'bandpass', to: 290 });
+      [48, 55, 60].forEach((note, i) => this._tone(midi(note), now + .04 + i * .014, .65, .055 * gain, { wave: 'sawtooth', unison: true, cutoff: 4500, cutoffEnd: 580, pan: (i - 1) * .4 }));
+      this._noise(now + .12, .46, .09 * gain, 5200, { pan: -.5, panTo: .5 });
+    }
+  }
+
+  /** Earned-reward reveal flourish, 0.8 s. No impact or vibration is scheduled. */
+  cinematic(type = 'hammer') {
+    type = rewardType(type);
+    if (!this._available('cinematic', .5)) return .8;
+    const now = this.context.currentTime;
+    const notes = { hammer: [55, 62, 67, 74], drone: [60, 67, 72, 79], rift: [58, 65, 70, 77], overdrive: [60, 64, 67, 72, 76] }[type];
+    this._noise(now, .34, .075, 750, { type: 'bandpass', to: 6200, rise: true, attack: .24 });
+    notes.forEach((note, i) => {
+      const time = now + .11 + i * .065;
+      this._tone(midi(note), time, .39, .088, { wave: 'triangle', pan: (i / (notes.length - 1) - .5) * .7 });
+      this._tone(midi(note + 12), time, .22, .028);
+    });
+    this._tone(56, now + .21, .55, .13, { to: 44 });
+    return .8;
+  }
+
   win() {
     this.stopRush();
     this._vibrate([35, 60, 35, 60, 80]);
@@ -295,7 +414,6 @@ export class GameAudio {
     if (music.elapsed === 0) {
       this._noise(now + .025, .7, .16, 8200, { to: 600, type: 'bandpass', music: true });
       this._tone(180, now + .025, .5, .2, { to: 42, music: true });
-      this._vibrate([28, 35, 60]);
     }
     this._tick();
     if (this._music) this._scheduler = setInterval(() => this._tick(), 25);

@@ -294,3 +294,13 @@ export function buildRushTurn(board, index, rng = Math.random) {
   if (!inBounds(index)) return result(board);
   return resolve(board, rng, [], { seeds: new Set(area(index)) });
 }
+
+/** Low-level atomic reward hit. Public reward selection lives in rewards.mjs. */
+export function buildRewardTurn(board, targetIndices, rng = Math.random) {
+  assertBoard(board);
+  const seeds = new Set(Array.from(targetIndices ?? []).filter(inBounds));
+  const outcome = seeds.size ? resolve(board, rng, [], { seeds }) : result(board);
+  // Keep the provenance even when a caller uses this lower-level entry point.
+  outcome.rewardGenerated = true;
+  return outcome;
+}

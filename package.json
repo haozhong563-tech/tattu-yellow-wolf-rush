@@ -9,7 +9,7 @@
     "dev": "vite --config vite.game.config.mjs --open /play.html",
     "build": "node scripts/build-game.mjs",
     "start": "vite preview --config vite.game.config.mjs",
-    "test": "node --test tests/model.test.mjs",
+    "test": "node --test",
     "build:legacy": "vinext build",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
