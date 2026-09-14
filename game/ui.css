@@ -3,3 +3,13 @@ html[data-motion="reduced"] *,html[data-motion="reduced"] *:before,html[data-mot
 .dialog button:focus-visible{outline:3px solid #6caa49;outline-offset:4px}
 body{display:grid;place-items:center}
 #app{height:min(100dvh,169.4444vw)}
+#app{container-type:size}
+.dialog h1{font-size:clamp(20px,6.2cqw,34px);white-space:nowrap}
+.dialog h2{font-size:clamp(20px,6cqw,32px)}
+.dialog .hero{height:22cqh;max-height:175px;margin:-4cqh auto 1cqh}
+.dialog .eyebrow{font-size:clamp(10px,2.8cqw,15px)}
+.dialog p{font-size:clamp(12px,3.2cqw,17px)}
+.goal-preview img{height:9cqh}
+.goal-preview b{font-size:clamp(17px,4.8cqw,28px)}
+.cta{font-size:clamp(18px,5.5cqw,28px)}
+.dialog .muted{font-size:clamp(10px,2.8cqw,14px)!important}
