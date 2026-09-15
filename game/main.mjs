@@ -10,4 +10,4 @@ const showError = () => {
 window.addEventListener('error',event=>{if(event.message&&/phaser|scene|model|Cannot|undefined/i.test(event.message)){console.error('Game error',event.error);showError();}});
 window.addEventListener('unhandledrejection',event=>{console.error('Game promise error',event.reason);showError();});
 window.addEventListener('pagehide',()=>game.scene.getScene('forest')?.audio?.suspend());
-document.addEventListener('visibilitychange',()=>{if(document.hidden)game.scene.getScene('forest')?.pauseGame();});
+document.addEventListener('visibilitychange',()=>{const scene=game.scene.getScene('forest');if(document.hidden)scene?.pauseGame();else scene?.checkClock();});

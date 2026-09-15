@@ -46,7 +46,7 @@ function cross(center) {
 }
 
 function rankCell(board, index, ice, origin) {
-  return (ice.has(index) ? 1000 : 0) + (board[index].special ? 30 : 0) + (board[index].kind < 2 ? 12 : 0) - distance(index, origin) * .01;
+  return (ice.has(index) ? 1000 : 0) + (board[index].obstacle ? 750 : 0) + (board[index].special ? 30 : 0) + (!board[index].obstacle && board[index].kind < 2 ? 12 : 0) - distance(index, origin) * .01;
 }
 
 function hammerTargets(board, count, ice, origin) {
@@ -59,7 +59,7 @@ function areaScore(board, indices, ice, covered, origin, center) {
   let score = 0;
   for (const index of indices) {
     if (covered.has(index)) continue;
-    score += (ice.has(index) ? 1000 : 0) + (board[index].special ? 30 : 0) + (board[index].kind < 2 ? 12 : 0) + 1;
+    score += (ice.has(index) ? 1000 : 0) + (board[index].obstacle ? 750 : 0) + (board[index].special ? 30 : 0) + (!board[index].obstacle && board[index].kind < 2 ? 12 : 0) + 1;
   }
   return score - distance(center, origin) * .01;
 }
@@ -83,7 +83,8 @@ function droneTargets(board, count, ice, origin) {
 }
 
 function riftTarget(board, ice, origin) {
-  const candidates = ice.size ? [...ice] : Array.from({ length: SIZE }, (_, index) => index);
+  const important = new Set([...ice, ...board.flatMap((cell, index) => cell.obstacle ? [index] : [])]);
+  const candidates = important.size ? [...important] : Array.from({ length: SIZE }, (_, index) => index);
   return candidates.sort((a, b) => areaScore(board, cross(b), ice, new Set(), origin, b) - areaScore(board, cross(a), ice, new Set(), origin, a) || a - b)[0];
 }
 

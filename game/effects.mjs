@@ -387,6 +387,8 @@ export class Effects {
 
   async _rift(x, y, targets, onImpact, waitForFade = true) {
     if (this.dead) return;
+    await this.portalBloom(x,y,1.1);
+    if (this.dead) return;
     const hole = this._own(this.scene.add.graphics());
     hole.setPosition(x, y).setDepth(84);
     hole.fillStyle(0x2d3159, .88).fillEllipse(0, 0, 145, 99);
@@ -403,6 +405,55 @@ export class Effects {
   }
 
   /** Physical reward attacks are visual-only; the scene remains owner of board rules. */
+  portalBloom(x,y,power=1) {
+    if(this.dead)return Promise.resolve();
+    if(this.reduced)return this._ring(x,y,0xd9a7ff,1.35,150,0,true);
+    const layer=this._own(this.scene.add.container(x,y));layer.setDepth(85).setScale(.08);
+    const core=this.scene.add.graphics();
+    for(let r=126;r>8;r-=7)core.fillStyle(0x17172f,r>100?.06:.13).fillCircle(0,0,r);
+    core.fillStyle(0x18192d,.82).fillCircle(0,0,79);
+    for(let i=9;i>0;i--)core.lineStyle(8,0x6450a8,.04+(9-i)*.025).strokeCircle(0,0,11*i);layer.add(core);
+    // An irregular, layered gaseous rim hides geometric endpoints and gives depth.
+    const vapor=this.scene.add.graphics();
+    for(let i=0;i<30;i++){
+      const a=i/30*Math.PI*2,r=107+Math.sin(i*2.7)*7,cx=Math.cos(a)*r,cy=Math.sin(a)*r;
+      const size=16+(i%4)*4;
+      vapor.fillStyle(0x222244,.55).fillCircle(cx,cy,size+5);
+      for(let k=5;k>0;k--)vapor.fillStyle(i%3?0x9980d8:0x6979cd,.085).fillCircle(cx-3,cy-4,size*k/5);
+      vapor.fillStyle(0xb2a1f1,.28).fillCircle(cx-7,cy-8,size*.46);
+      vapor.fillStyle(0x6d549f,.3).fillCircle(cx+5,cy+7,size*.62);
+    }
+    layer.add(vapor);
+    const corona=this.scene.add.graphics();
+    for(let arc=0;arc<5;arc++)for(const [width,tint,alpha] of [[20,0x9278e0,.11],[8,0x9b80f5,.6],[2,0xd5ceff,.96]]){
+      corona.lineStyle(width,tint,alpha).beginPath();
+      for(let i=0;i<=24;i++){const a=arc*Math.PI*2/5+i/24*.87,r=94+Math.sin(a*9)*3;const px=Math.cos(a)*r,py=Math.sin(a)*r;if(i)corona.lineTo(px,py);else corona.moveTo(px,py);}corona.strokePath();
+    }
+    layer.add(corona);this.scene.tweens.add({targets:vapor,angle:-23,duration:700});this.scene.tweens.add({targets:corona,angle:44,duration:700});
+    const makeSpiral=(color,offset)=>{const g=this.scene.add.graphics();for(let arm=0;arm<3;arm++){for(const [w,c,a]of [[15,0x323154,.9],[8,color,.85],[2,0xeeecff,.95]]){g.lineStyle(w,c,a).beginPath();for(let i=0;i<=45;i++){const t=i/45,angle=offset+arm*Math.PI*2/3+t*3.8,r=15+t*94;const px=Math.cos(angle)*r,py=Math.sin(angle)*r;if(i)g.lineTo(px,py);else g.moveTo(px,py);}g.strokePath();}}return g;};
+    const outer=makeSpiral(0xb398ff,0),inner=makeSpiral(0x72dbff,1.2);inner.setScale(.68);layer.add([outer,inner]);
+    for(let i=0;i<16;i++){const a=i/16*Math.PI*2,r=112+(i%3)*7,puff=this._sprite('smoke',x+Math.cos(a)*r,y+Math.sin(a)*r, i%2?0xa885d5:0x7277bb,.55,false);if(puff){puff.setAlpha(.58);this._animate(puff,{x:x+Math.cos(a+.35)*r*1.45,y:y+Math.sin(a+.35)*r*1.45,scale:1.08,alpha:0,duration:850,delay:i%3*35,ease:'Sine.Out'});}}
+    this.scene.tweens.add({targets:outer,angle:155,duration:680});this.scene.tweens.add({targets:inner,angle:-210,duration:680});
+    return this._animate(layer,{scale:power,duration:220,ease:'Back.Out'},false).then(()=>{if(this.dead||!layer.active)return;return this._animate(layer,{scale:.08,alpha:0,angle:50,duration:420,delay:120,ease:'Cubic.In'});});
+  }
+
+  obstacleRelease(type,x,y) {
+    if(this.dead)return;
+    if(type==='prism'){this.portalBloom(x,y,.8);this._radial(x,y,0xcda7ff,190,14);return;}
+    if(type==='battery'){for(let i=0;i<6;i++){const a=i/6*Math.PI*2;this._lightning({x,y},{x:x+Math.cos(a)*130,y:y+Math.sin(a)*115},GOLD,3.4,420);}this._ring(x,y,CYAN,2.2,500);return;}
+    const color=type==='rock'?0x7d9696:0xc29753;
+    for(let i=0;i<(this.reduced?4:10);i++){const a=i/10*Math.PI*2,chunk=this._own(this.scene.add.graphics(),false);chunk.setPosition(x,y);chunk.fillStyle(0x29454d).fillTriangle(-12,-11,16,-4,-1,19);chunk.fillStyle(color).fillTriangle(-8,-9,12,-3,-1,13);const distance=55+(i%4)*24;this._animate(chunk,{x:x+Math.cos(a)*distance,y:y+Math.sin(a)*distance+36,angle:(i%2?1:-1)*160,scale:.1,alpha:0,duration:this.reduced?180:620,ease:'Cubic.Out'});}
+    this._smoke(x,y,type==='rock'?0x759391:0xa78b66,1.1,7);this._cracks(x,y,.85);this._ring(x,y,GOLD,1.65,390);this._shake(100,.0027);
+  }
+
+  // Incoming projectiles use a readable glowing head and a tapered trail.
+  async meteor(from,to) {
+    if(this.dead)return;
+    const node=this._own(this.scene.add.container(from.x,from.y));node.setDepth(102);const g=this.scene.add.graphics();
+    g.fillStyle(0x75374e,.9).fillTriangle(-88,0,0,-19,0,19);g.fillStyle(0xffa941).fillTriangle(-69,0,0,-13,0,13);g.fillStyle(0xffe8a1).fillEllipse(0,0,31,25);g.fillStyle(0xfff7db).fillEllipse(4,-2,18,15);node.add(g);const angle=Math.atan2(to.y-from.y,to.x-from.x);node.setRotation(angle);
+    await this._animate(node,{x:to.x,y:to.y,duration:this.reduced?70:190,ease:'Quad.In'});
+  }
+
   async rewardAttack(type, targets = [], onImpact) {
     if (this.dead) return;
     const points = targets.filter(point => Number.isFinite(point?.x) && Number.isFinite(point?.y));
@@ -435,10 +486,11 @@ export class Effects {
     await this._travel(drone, from, hover, { x: 360, y: Math.min(from.y, hover.y) - 120 }, 410);
     if (this.dead || !drone.active) return;
     this._lightning({ x: hover.x, y: hover.y + 24 }, target, CYAN, 3.2, 240);
-    targets.slice(0, this.reduced ? 2 : 4).forEach((point, index) => {
+    for(const [index,point] of targets.slice(0, this.reduced ? 2 : 4).entries()) {
+      await this.meteor({x:hover.x,y:hover.y+22},point);if(this.dead)return;
       this.impact(point.x, point.y, 'drone', .95);
       onImpact?.(point, index, 'drone');
-    });
+    }
     const exit = { x: hover.x < 360 ? 800 : -80, y: hover.y - 190 };
     this._travel(drone, hover, exit, { x: 360, y: hover.y - 250 }, 420, true);
   }

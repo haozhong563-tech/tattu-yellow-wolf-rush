@@ -1,8 +1,9 @@
 /* Original, procedural game audio. No recorded songs or external audio requests.
- * Call unlock() from the first pointer/keyboard gesture. All rushes last 15 s.
+ * Call unlock() from the first pointer/keyboard gesture. Gameplay rushes default
+ * to 5 s; pass 15 explicitly when auditioning the complete original cues.
  * onBeat({ beat, bar, strength, track, time }) uses the AudioContext clock.
  */
-const MUSIC_SECONDS = 15;
+const DEFAULT_RUSH_SECONDS = 5;
 const MAX_VOICES = 128;
 const midi = note => 440 * 2 ** ((note - 69) / 12);
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
@@ -386,12 +387,13 @@ export class GameAudio {
     [67, 63, 60, 55].forEach((note, i) => this._tone(midi(note), now + i * .14, .35, .13, { wave: 'triangle', cutoff: 2300 }));
   }
 
-  startRush(trackIndex = 0, onBeat) {
+  startRush(trackIndex = 0, onBeat, durationSeconds = DEFAULT_RUSH_SECONDS) {
     this.stopRush();
     if (this._destroyed) return;
     const index = ((Math.trunc(Number(trackIndex) || 0) % TRACKS.length) + TRACKS.length) % TRACKS.length;
     const generation = this._generation;
-    this._music = { index, onBeat, start: null, nextStep: 0, elapsed: 0, lastBeat: -1 };
+    const duration = Number.isFinite(durationSeconds) ? clamp(durationSeconds, 1, 15) : DEFAULT_RUSH_SECONDS;
+    this._music = { index, onBeat, duration, start: null, nextStep: 0, elapsed: 0, lastBeat: -1 };
     void this.unlock().then(() => {
       if (!this.context || this._destroyed || generation !== this._generation || !this._music || this._paused) return;
       this._begin();
@@ -409,8 +411,8 @@ export class GameAudio {
     this._musicBus.gain.cancelScheduledValues(now);
     this._musicBus.gain.setValueAtTime(.0001, now);
     this._musicBus.gain.linearRampToValueAtTime(.62, now + .03);
-    this._musicBus.gain.setValueAtTime(.62, Math.max(now + .04, music.start + MUSIC_SECONDS - .13));
-    this._musicBus.gain.linearRampToValueAtTime(.0001, Math.max(now + .05, music.start + MUSIC_SECONDS));
+    this._musicBus.gain.setValueAtTime(.62, Math.max(now + .04, music.start + music.duration - .13));
+    this._musicBus.gain.linearRampToValueAtTime(.0001, Math.max(now + .05, music.start + music.duration));
     if (music.elapsed === 0) {
       this._noise(now + .025, .7, .16, 8200, { to: 600, type: 'bandpass', music: true });
       this._tone(180, now + .025, .5, .2, { to: 42, music: true });
@@ -423,11 +425,11 @@ export class GameAudio {
     const music = this._music, ctx = this.context;
     if (!music || !ctx || this._paused || ctx.state !== 'running' || music.start === null) return;
     const elapsed = ctx.currentTime - music.start;
-    if (elapsed >= MUSIC_SECONDS) { this.stopRush(); return; }
+    if (elapsed >= music.duration) { this.stopRush(); return; }
     const track = COMPOSITIONS[music.index], stepDuration = 60 / track.bpm / 4;
     // Discard late notes after an OS interruption; never burst a backlog of drums.
     music.nextStep = Math.max(music.nextStep, Math.floor(Math.max(0, elapsed - .025) / stepDuration));
-    while (music.nextStep * stepDuration < MUSIC_SECONDS) {
+    while (music.nextStep * stepDuration < music.duration) {
       const index = music.nextStep;
       const swing = index % 2 ? track.swing * stepDuration : 0;
       const time = music.start + index * stepDuration + swing;
@@ -451,7 +453,7 @@ export class GameAudio {
   _scheduleStep(track, index, time, stepDuration) {
     if (!this.enabled) return;
     const step = index % 16, bar = Math.floor(index / 16);
-    const phase = index * stepDuration / MUSIC_SECONDS;
+    const phase = index * stepDuration / this._music.duration;
     const root = track.root + track.progression[bar % track.progression.length];
     const fill = (bar % 4 === 3 && step >= 12) || phase > .88;
     const drop = phase > .53 && phase < .88;
@@ -514,7 +516,7 @@ export class GameAudio {
     this._paused = true;
     this._generation++;
     const ctx = this.context;
-    if (this._music && ctx && this._music.start !== null) this._music.elapsed = clamp(ctx.currentTime - this._music.start, 0, MUSIC_SECONDS);
+    if (this._music && ctx && this._music.start !== null) this._music.elapsed = clamp(ctx.currentTime - this._music.start, 0, this._music.duration);
     this._clearTimers();
     for (const voice of [...this._voices]) this._dispose(voice);
     if (ctx && ctx.state === 'running') this._contextTransition = ctx.suspend().catch(() => {});
@@ -528,7 +530,7 @@ export class GameAudio {
     if (this._destroyed || this._paused || generation !== this._generation) return;
     await this.unlock();
     if (this._destroyed || this._paused || generation !== this._generation) return;
-    if (this._music && this._music.elapsed < MUSIC_SECONDS) this._begin();
+    if (this._music && this._music.elapsed < this._music.duration) this._begin();
     else if (this._music) this.stopRush();
   }
 
